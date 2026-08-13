@@ -169,7 +169,12 @@ async function handleUsage(res) {
   const accounts = await loadAccounts();
   if (accounts === null) {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "accounts.json not found — copy accounts.example.json and add your tokens" }));
+    res.end(JSON.stringify({ error: "accounts.json not found — run ./import-local.sh, or copy accounts.example.json and add your tokens" }));
+    return;
+  }
+  if (accounts.length === 0) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "accounts.json has no accounts yet — run ./import-local.sh to add this machine's login" }));
     return;
   }
   const results = await Promise.all(

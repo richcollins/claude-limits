@@ -2,21 +2,21 @@
 
 Local dashboard for Claude usage limits across multiple OAuth accounts. Zero-dependency Node: `server.mjs` (proxy + static) and `public/index.html` (single-file frontend). No build step, no npm.
 
-## Runs under launchd — restart after server edits
+## Usually runs under launchd — restart after server edits
 
-The server runs as LaunchAgent `com.richcollins.claude-limits` (KeepAlive), not from a terminal. Edits to `server.mjs` do nothing until:
+`./install-agent.sh` installs LaunchAgent `local.claude-limits` (KeepAlive), so the server is typically not running from a terminal. Edits to `server.mjs` do nothing until:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.richcollins.claude-limits
+launchctl kickstart -k gui/$(id -u)/local.claude-limits
 ```
 
-Frontend edits need only a page reload. Logs: `~/Library/Logs/claude-limits.log`. Port **10460** — don't move it (dock web-app and launch.json attach configs point there), and never use 10450 (wt-tree).
+(`launchctl list | grep claude-limits` if the label was customised; a machine set up before the install script may still use a different one.) Frontend edits need only a page reload. Logs: `~/Library/Logs/claude-limits.log`. Port **10460** — moving it means updating `.claude/launch.json` and re-adding any dock web-app.
 
 ## accounts.json
 
 Gitignored; contains live OAuth tokens — never commit, print, or paste its values into commands. Two entry kinds:
 
-- Full-scope login credentials (`accessToken` + `refreshToken` + `expiresAt`, from Keychain item `Claude Code-credentials` via `./import-local.sh`): server auto-refreshes and writes the new pair back.
+- Full-scope login credentials (`accessToken` + `refreshToken` + `expiresAt`, imported by `./import-local.sh` from the macOS Keychain item `Claude Code-credentials`, else `~/.claude/.credentials.json`): server auto-refreshes and writes the new pair back.
 - `claude setup-token` tokens (`accessToken` only): inference-only scope, valid ~1 year, no refresh token exists.
 
 ## API facts (verified against Claude Code 2.1.228 binary + live API, 2026-08)
