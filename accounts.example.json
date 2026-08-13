@@ -1,0 +1,12 @@
+[
+  {
+    "name": "personal",
+    "accessToken": "sk-ant-oat01-...",
+    "refreshToken": "sk-ant-ort01-...",
+    "expiresAt": 0
+  },
+  {
+    "name": "work",
+    "accessToken": "sk-ant-oat01-..."
+  }
+]

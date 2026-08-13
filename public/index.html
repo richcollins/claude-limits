@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Limits</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="Claude Limits">
+<meta name="theme-color" content="#0f1115">
+<style>
+  :root {
+    --bg: #0f1115; --card: #181b22; --text: #e6e8ee; --dim: #8b90a0;
+    --track: #262b36; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, "SF Pro Text", Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  #updated { color: var(--dim); font-size: 12px; margin-bottom: 20px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border-radius: 10px; padding: 16px 18px; }
+  .card h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: baseline; }
+  .card h2 .sub { color: var(--dim); font-size: 11px; font-weight: 400; }
+  .card.err { border: 1px solid var(--bad); }
+  .errmsg { color: var(--bad); font-size: 13px; word-break: break-word; }
+  .row { margin-bottom: 12px; }
+  .row:last-child { margin-bottom: 0; }
+  .row .label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .row .label .pct { font-variant-numeric: tabular-nums; }
+  .row .resets { color: var(--dim); font-size: 11px; margin-top: 3px; }
+  .bar { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+  .bar > div { height: 100%; border-radius: 4px; transition: width .4s; }
+  .extra { color: var(--dim); font-size: 12px; margin-top: 10px; border-top: 1px solid var(--track); padding-top: 10px; }
+  details { margin-top: 10px; }
+  summary { color: var(--dim); font-size: 11px; cursor: pointer; }
+  pre { font-size: 11px; overflow-x: auto; color: var(--dim); }
+</style>
+</head>
+<body>
+<h1>Claude Limits</h1>
+<div id="updated">loading…</div>
+<div id="grid"></div>
+
+<script>
+const WINDOW_LABELS = {
+  five_hour: "Session (5h)",
+  seven_day: "Week — all models",
+  seven_day_opus: "Week — Opus",
+  seven_day_sonnet: "Week — Sonnet",
+  seven_day_oauth_apps: "Week — apps",
+  seven_day_fable: "Week — Fable",
+  seven_day_overage_included: "Week — incl. extra usage",
+  overage: "Extra usage",
+};
+
+const LIMIT_KIND_LABELS = {
+  session: "Session (5h)",
+  weekly_all: "Week — all models",
+};
+
+function barColor(pct) {
+  return pct >= 90 ? "var(--bad)" : pct >= 70 ? "var(--warn)" : "var(--ok)";
+}
+
+function fmtReset(iso) {
+  if (!iso) return "";
+  const t = typeof iso === "number" ? iso * 1000 : Date.parse(iso);
+  if (isNaN(t)) return "";
+  const ms = t - Date.now();
+  const abs = new Date(t).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+  if (ms <= 0) return `reset due (${abs})`;
+  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  const rel = h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return `resets in ${rel} · ${abs}`;
+}
+
+function row(label, pct, resetsAt) {
+  if (pct == null) return "";
+  const p = Math.min(100, Math.max(0, pct));
+  return `<div class="row">
+    <div class="label"><span>${label}</span><span class="pct">${p.toFixed(0)}%</span></div>
+    <div class="bar"><div style="width:${p}%;background:${barColor(p)}"></div></div>
+    <div class="resets">${fmtReset(resetsAt)}</div>
+  </div>`;
+}
+
+function renderAccount(acct) {
+  if (!acct.ok) {
+    return `<div class="card err"><h2>${acct.name}</h2><div class="errmsg">${acct.error}</div></div>`;
+  }
+  const u = acct.usage || {};
+  let rows = "";
+
+  if (u.limits?.length) {
+    // limits[] is the authoritative list: session, weekly_all, and scoped
+    // per-model/surface windows.
+    for (const lim of u.limits) {
+      const scopeName = lim.scope?.model?.display_name || lim.scope?.surface?.display_name;
+      const label = scopeName ? `Week — ${scopeName}` : (LIMIT_KIND_LABELS[lim.kind] || lim.kind);
+      rows += row(label, lim.percent, lim.resets_at);
+    }
+  } else {
+    // Fallback for responses without limits[]: named utilization windows (0–100).
+    for (const [key, label] of Object.entries(WINDOW_LABELS)) {
+      const w = u[key];
+      if (w && w.utilization != null) rows += row(label, w.utilization, w.resets_at);
+    }
+  }
+
+  let extra = "";
+  const spend = u.spend;
+  if (spend?.enabled && spend.used) {
+    const money = (m) => m == null ? "?" : `$${(m.amount_minor / 10 ** (m.exponent ?? 2)).toFixed(2)}`;
+    extra = `<div class="extra">Extra usage: ${money(spend.used)} / ${money(spend.limit)}${spend.disabled_reason ? ` (${spend.disabled_reason})` : ""}</div>`;
+  } else if (u.extra_usage?.is_enabled) {
+    const e = u.extra_usage;
+    const dp = e.decimal_places ?? 2;
+    const used = e.used_credits != null ? `$${(e.used_credits / 10 ** dp).toFixed(2)}` : "?";
+    const cap = e.monthly_limit != null ? ` / $${(e.monthly_limit / 10 ** dp).toFixed(2)}` : "";
+    extra = `<div class="extra">Extra usage: ${used}${cap}${e.disabled_reason ? ` (${e.disabled_reason})` : ""}</div>`;
+  }
+
+  if (!rows) rows = `<div class="resets">no limit data returned</div>`;
+
+  const state = u.status === "rejected" ? " · rate limited" : u.status === "allowed_warning" ? " · near limit" : "";
+  const sub = u.source === "headers" ? `<span class="sub">via inference headers${state}</span>` : "";
+  return `<div class="card">
+    <h2>${acct.name}${sub}</h2>
+    ${rows}${extra}
+    <details><summary>raw</summary><pre>${JSON.stringify(u, null, 2)}</pre></details>
+  </div>`;
+}
+
+async function refresh() {
+  const updated = document.getElementById("updated");
+  try {
+    const res = await fetch("/api/usage");
+    const data = await res.json();
+    if (data.error) { updated.textContent = data.error; return; }
+    document.getElementById("grid").innerHTML = data.accounts.map(renderAccount).join("");
+    updated.textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (err) {
+    updated.textContent = "fetch failed: " + err;
+  }
+}
+
+refresh();
+setInterval(refresh, 60_000);
+</script>
+</body>
+</html>
