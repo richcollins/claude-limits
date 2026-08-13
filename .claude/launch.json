@@ -1,0 +1,10 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "claude-limits",
+      "url": "http://localhost:10460",
+      "port": 10460
+    }
+  ]
+}
