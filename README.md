@@ -33,6 +33,12 @@ exists updates that entry instead of duplicating it.
 `accounts.json` is a plain array (see `accounts.example.json`). It is gitignored, and it
 holds live OAuth tokens — treat it like a password file and never commit or paste it.
 
+The server also **writes** it: refreshing a full-login entry (on dashboard polls or
+`/api/token` calls alike) persists the new token pair by rewriting the whole file. Don't
+hand-edit it while the server is running — your edit can be overwritten by a concurrent
+refresh. Stop the server first, or edit and then restart. (Instances holding only setup
+tokens never refresh, so this doesn't apply to them.)
+
 Each entry needs `name` + `accessToken`, optionally `refreshToken` and `expiresAt`. Two
 kinds of token work, with different fidelity:
 

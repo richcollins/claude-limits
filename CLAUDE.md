@@ -18,7 +18,7 @@ launchctl kickstart -k gui/$(id -u)/local.claude-limits
 
 ## accounts.json
 
-Gitignored; contains live OAuth tokens — never commit, print, or paste its values into commands. Two entry kinds:
+Gitignored; contains live OAuth tokens — never commit, print, or paste its values into commands. The server rewrites the whole file whenever it refreshes a full-login entry (dashboard polls and `/api/token` alike), so never hand-edit it while the server is live — stop it first or kickstart after. Two entry kinds:
 
 - Full-scope login credentials (`accessToken` + `refreshToken` + `expiresAt`, imported by `./import-local.sh` from the macOS Keychain item `Claude Code-credentials`, else `~/.claude/.credentials.json`): server auto-refreshes and writes the new pair back.
 - `claude setup-token` tokens (`accessToken` only): inference-only scope, valid ~1 year, no refresh token exists.
