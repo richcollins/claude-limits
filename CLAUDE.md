@@ -21,7 +21,7 @@ launchctl kickstart -k gui/$(id -u)/local.claude-limits
 Gitignored; contains live OAuth tokens — never commit, print, or paste its values into commands. The server rewrites the whole file whenever it refreshes a full-login entry (dashboard polls and `/api/token` alike), so never hand-edit it while the server is live — stop it first or kickstart after. Two entry kinds:
 
 - Full-scope login credentials (`accessToken` + `refreshToken` + `expiresAt`, imported by `./import-local.sh` from the macOS Keychain item `Claude Code-credentials`, else `~/.claude/.credentials.json`): server auto-refreshes and writes the new pair back.
-- `claude setup-token` tokens (`accessToken` only): inference-only scope, valid ~1 year, no refresh token exists.
+- `claude setup-token` tokens (`accessToken` only): inference-only scope, valid ~1 year, no refresh token exists. Optional `tokenExpiresAt` (ISO or epoch, recorded by hand at mint + 1 year — the API offers no way to look it up): surfaces in `/api/usage` + `/api/status` per account, and the dashboard warns within 30 days of it. Distinct from `expiresAt` (access-token expiry, server-managed).
 
 ## API facts (verified against Claude Code 2.1.228 binary + live API, 2026-08)
 

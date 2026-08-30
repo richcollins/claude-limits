@@ -199,11 +199,12 @@ function getUsage() {
     const results = await Promise.all(
       accounts.map(async (account) => {
         const name = account.name || "unnamed";
+        const tokenExpiresAt = tokenExpiryIso(account.tokenExpiresAt);
         try {
           const usage = await fetchUsage(account, accounts);
-          return { name, ok: true, usage, fetchedAt: Date.now() };
+          return { name, ok: true, usage, tokenExpiresAt, fetchedAt: Date.now() };
         } catch (err) {
-          return { name, ok: false, error: String(err.message || err) };
+          return { name, ok: false, error: String(err.message || err), tokenExpiresAt };
         }
       })
     );
@@ -212,6 +213,16 @@ function getUsage() {
   usageCache = { at, promise };
   promise.catch(() => { if (usageCache?.promise === promise) usageCache = null; });
   return promise;
+}
+
+// Optional accounts.json field `tokenExpiresAt` (ISO string, epoch seconds, or
+// epoch ms): when the token itself dies — recorded by hand at mint time for
+// setup tokens, since nothing else knows their ~1-year lifetime. Distinct from
+// `expiresAt` (access-token expiry, refreshed automatically for full logins).
+function tokenExpiryIso(v) {
+  if (v == null) return null;
+  const t = typeof v === "number" ? (v < 1e12 ? v * 1000 : v) : Date.parse(v);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
 function sendJson(res, data) {
@@ -300,7 +311,7 @@ async function handleStatus(res) {
     return;
   }
   const accounts = data.accounts.map((acct) => {
-    if (!acct.ok) return { name: acct.name, ok: false, error: acct.error };
+    if (!acct.ok) return { name: acct.name, ok: false, error: acct.error, tokenExpiresAt: acct.tokenExpiresAt ?? null };
     const windows = normalizeWindows(acct.usage);
     return {
       name: acct.name,
@@ -308,6 +319,7 @@ async function handleStatus(res) {
       source: acct.usage.source === "headers" ? "headers" : "endpoint",
       status: statusOf(windows, acct.usage.status),
       windows,
+      tokenExpiresAt: acct.tokenExpiresAt ?? null,
       fetchedAt: acct.fetchedAt,
     };
   });

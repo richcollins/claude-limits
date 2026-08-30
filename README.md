@@ -54,6 +54,14 @@ To add an account from **another machine**, run `import-local.sh` there and copy
 resulting entry over, or run `claude setup-token` on that machine and paste the token in
 with a `name`.
 
+For setup-token entries, also record `"tokenExpiresAt"` (ISO date or epoch) as **the day
+you mint it + 1 year** — nothing else knows the token's lifetime, and `claude setup-token`
+doesn't report one. The dashboard warns on the card once expiry is within 30 days (red
+inside 7), and `/api/status` exposes the field per account so other consumers can warn
+too. Full-login entries don't need it: their access token auto-refreshes, and their
+failure mode (refresh-token revocation) has no predictable date. Don't confuse it with
+`expiresAt`, which is the short-lived access-token expiry the server manages itself.
+
 ## Always-on (macOS)
 
 ```bash

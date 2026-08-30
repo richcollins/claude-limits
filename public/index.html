@@ -90,9 +90,26 @@ function row(label, pct, resetsAt) {
   </div>`;
 }
 
+// Silent until the account's token is within 30 days of dying (the field is
+// recorded at mint time for setup tokens; full-login entries auto-refresh and
+// normally have no tokenExpiresAt).
+function tokenWarning(iso) {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (isNaN(t)) return "";
+  const days = (t - Date.now()) / 86400000;
+  if (days > 30) return "";
+  const abs = new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
+  const color = days < 7 ? "var(--bad)" : "var(--warn)";
+  const text = days <= 0
+    ? `token expired (${abs}) — mint a new one: claude setup-token`
+    : `token expires in ${Math.ceil(days)}d (${abs})`;
+  return `<div class="extra" style="color:${color}">⚠ ${text}</div>`;
+}
+
 function renderAccount(acct) {
   if (!acct.ok) {
-    return `<div class="card err"><h2>${acct.name}</h2><div class="errmsg">${acct.error}</div></div>`;
+    return `<div class="card err"><h2>${acct.name}</h2><div class="errmsg">${acct.error}</div>${tokenWarning(acct.tokenExpiresAt)}</div>`;
   }
   const u = acct.usage || {};
   let rows = "";
@@ -132,7 +149,7 @@ function renderAccount(acct) {
   const sub = u.source === "headers" ? `<span class="sub">via inference headers${state}</span>` : "";
   return `<div class="card">
     <h2>${acct.name}${sub}</h2>
-    ${rows}${extra}
+    ${rows}${extra}${tokenWarning(acct.tokenExpiresAt)}
     <details><summary>raw</summary><pre>${JSON.stringify(u, null, 2)}</pre></details>
   </div>`;
 }
