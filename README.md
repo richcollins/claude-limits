@@ -25,20 +25,22 @@ node server.mjs               # http://localhost:10460
 
 `import-local.sh` reads the credentials Claude Code already stored on the machine (macOS
 Keychain item `Claude Code-credentials`, otherwise `~/.claude/.credentials.json`) and
-appends them to `accounts.json`. Run it once per name; re-running with a name that already
+appends them to the accounts file. Run it once per name; re-running with a name that already
 exists updates that entry instead of duplicating it.
 
 ## Adding more accounts
 
-`accounts.json` lives at `~/.config/claude-limits/accounts.json` (`ACCOUNTS_PATH` env
-overrides; a legacy repo-local `accounts.json` from an older install still works until
-you move it). It's a plain array (see `accounts.example.json`) of live OAuth tokens —
-treat it like a password file and never commit or paste it. It's kept outside the repo
-deliberately: a working tree is one `git clean -fdx` away from deleting it, and copies or
-archives of the repo would carry it along. Migrating an older install:
+The accounts file lives at `~/.config/claude-limits/claude-oauth-accounts.json`
+(`ACCOUNTS_PATH` env overrides; a legacy repo-local `accounts.json` from an older install
+still works until you move it). The basename says what it holds on purpose — mounted into
+another stack, `accounts.json` alone could mean anything. It's a plain array (see
+`accounts.example.json`) of live OAuth tokens — treat it like a password file and never
+commit or paste it. It's kept outside the repo deliberately: a working tree is one
+`git clean -fdx` away from deleting it, and copies or archives of the repo would carry it
+along. Migrating an older install:
 
 ```bash
-mkdir -p ~/.config/claude-limits && mv accounts.json ~/.config/claude-limits/ && launchctl kickstart -k gui/$(id -u)/local.claude-limits
+mkdir -p ~/.config/claude-limits && mv accounts.json ~/.config/claude-limits/claude-oauth-accounts.json && launchctl kickstart -k gui/$(id -u)/local.claude-limits
 ```
 
 The server also **writes** it: refreshing a full-login entry (on dashboard polls or
@@ -52,7 +54,7 @@ kinds of token work, with different fidelity:
 
 - **A full login** (`accessToken` + `refreshToken` + `expiresAt`, what `import-local.sh`
   imports) — full per-model breakdown from the usage endpoint, and the server refreshes
-  the token itself when it expires, writing the new pair back to `accounts.json`.
+  the token itself when it expires, writing the new pair back to the accounts file.
 - **A `claude setup-token` token** (`accessToken` only, valid ~1 year) — inference-only
   scope, so the usage endpoint rejects it. The server falls back to reading rate-limit
   headers off a minimal 1-token inference request. Those cards are labelled
@@ -156,7 +158,7 @@ server probes haiku + fable per account.
 
 For trusted consumers that run inference themselves (e.g. injecting
 `CLAUDE_CODE_OAUTH_TOKEN` into a subprocess) and want this server to stay the single
-owner of `accounts.json`:
+owner of the accounts file:
 
 ```
 GET /api/token?name=<account>
@@ -173,7 +175,7 @@ refreshed before serving; setup-token accounts return the long-lived token as-is
 
 The same codebase runs anywhere Node does, with no config beyond env vars — e.g. a
 production box whose services want limit awareness. Give the remote instance its **own**
-`accounts.json` of `claude setup-token` tokens (~1 year, inference-only scope, no refresh
+accounts file of `claude setup-token` tokens (~1 year, inference-only scope, no refresh
 credential): copies of full-login entries would fork the refresh-token rotation between
 hosts, and setup tokens keep the remote box holding the least-privileged secret that
 still works. Nothing is shared between instances but the git repo.
@@ -190,10 +192,10 @@ network, and nothing faces the internet:
       - ./claude-limits:/app
       # accounts file stays outside the repo checkout; :ro is fine when it
       # holds only setup tokens (nothing ever refreshes, so nothing writes)
-      - ~/.config/claude-limits/accounts.json:/data/accounts.json:ro
+      - ~/.config/claude-limits/claude-oauth-accounts.json:/data/claude-oauth-accounts.json:ro
     environment:
       LIMITS_KEY: ${LIMITS_KEY}
-      ACCOUNTS_PATH: /data/accounts.json
+      ACCOUNTS_PATH: /data/claude-oauth-accounts.json
     restart: unless-stopped
     # no ports: — reachable only inside the stack at http://claude-limits:10460
 ```

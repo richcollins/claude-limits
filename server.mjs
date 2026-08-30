@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Claude limits dashboard — zero-dependency Node server.
-// Reads OAuth accounts from accounts.json, proxies GET /api/usage to
+// Reads OAuth accounts from claude-oauth-accounts.json, proxies GET /api/usage to
 // https://api.anthropic.com/api/oauth/usage per account (CORS blocks doing
 // this from the browser), auto-refreshes expired access tokens, serves the
 // static dashboard.
@@ -16,18 +16,21 @@ import path from "node:path";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 10460;
 
-// accounts.json lives OUTSIDE the repo by default: a working tree is a bad
+// The accounts file lives OUTSIDE the repo by default: a working tree is a bad
 // home for live credentials (git clean -fdx deletes ignored files, repo
-// copies/archives carry them along, worktrees don't see them). Resolution:
-// $ACCOUNTS_PATH > XDG config > legacy repo-local file (pre-move installs).
+// copies/archives carry them along, worktrees don't see them). The basename is
+// self-describing because the file gets mounted into other stacks where the
+// directory no longer says what it is. Resolution:
+// $ACCOUNTS_PATH > XDG config > legacy repo-local accounts.json (pre-move installs).
+const ACCOUNTS_FILE = "claude-oauth-accounts.json";
 const CONFIG_DIR = path.join(
   process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"),
   "claude-limits"
 );
 const ACCOUNTS_PATH = process.env.ACCOUNTS_PATH
-  || [path.join(CONFIG_DIR, "accounts.json"), path.join(ROOT, "accounts.json")]
+  || [path.join(CONFIG_DIR, ACCOUNTS_FILE), path.join(ROOT, "accounts.json")]
     .find((p) => existsSync(p))
-  || path.join(CONFIG_DIR, "accounts.json");
+  || path.join(CONFIG_DIR, ACCOUNTS_FILE);
 
 const API_ORIGIN = "https://api.anthropic.com";
 const USAGE_PATH = "/api/oauth/usage";
@@ -44,7 +47,7 @@ async function loadAccounts() {
     return null; // missing file
   }
   const parsed = JSON.parse(raw);
-  if (!Array.isArray(parsed)) throw new Error("accounts.json must be an array");
+  if (!Array.isArray(parsed)) throw new Error(`${ACCOUNTS_PATH} must be an array`);
   return parsed;
 }
 
@@ -208,7 +211,7 @@ function getUsage() {
       return { error: `no accounts file at ${ACCOUNTS_PATH} — run ./import-local.sh, or copy accounts.example.json there and add your tokens` };
     }
     if (accounts.length === 0) {
-      return { error: "accounts.json has no accounts yet — run ./import-local.sh to add this machine's login" };
+      return { error: `${ACCOUNTS_PATH} has no accounts yet — run ./import-local.sh to add this machine's login` };
     }
     const results = await Promise.all(
       accounts.map(async (account) => {
@@ -229,7 +232,7 @@ function getUsage() {
   return promise;
 }
 
-// Optional accounts.json field `tokenExpiresAt` (ISO string, epoch seconds, or
+// Optional accounts-file field `tokenExpiresAt` (ISO string, epoch seconds, or
 // epoch ms): when the token itself dies — recorded by hand at mint time for
 // setup tokens, since nothing else knows their ~1-year lifetime. Distinct from
 // `expiresAt` (access-token expiry, refreshed automatically for full logins).
@@ -346,7 +349,7 @@ async function handleStatus(res) {
 // --- /api/token: token broker for trusted local consumers ---------------------
 // Hands the named account's access token to a client that will run inference
 // itself (e.g. darksided injecting CLAUDE_CODE_OAUTH_TOKEN into an SDK
-// subprocess). This server stays the single owner of accounts.json — consumers
+// subprocess). This server stays the single owner of the accounts file — consumers
 // never read the file or refresh tokens themselves. Deliberately NOT CORS-open
 // (unlike /api/status, which is safe to open because it's token-free), and
 // fail-closed: disabled unless LIMITS_KEY is set in the environment.

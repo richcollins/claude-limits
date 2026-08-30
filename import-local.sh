@@ -1,6 +1,6 @@
 #!/bin/bash
-# Add this machine's logged-in Claude Code account to accounts.json, reading the
-# credentials Claude Code already stored (macOS Keychain, else
+# Add this machine's logged-in Claude Code account to the accounts file, reading
+# the credentials Claude Code already stored (macOS Keychain, else
 # ~/.claude/.credentials.json). Re-running with the same name updates that entry.
 #
 # Usage: ./import-local.sh [account-name]     (default name: "local")
@@ -10,10 +10,11 @@ cd "$(dirname "$0")"
 NAME="${1:-local}"
 
 # Same resolution as server.mjs: $ACCOUNTS_PATH > XDG config > legacy repo file.
+XDG_ACCOUNTS="${XDG_CONFIG_HOME:-$HOME/.config}/claude-limits/claude-oauth-accounts.json"
 if [ -n "${ACCOUNTS_PATH:-}" ]; then
   ACCOUNTS="$ACCOUNTS_PATH"
-elif [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/claude-limits/accounts.json" ] || [ ! -f accounts.json ]; then
-  ACCOUNTS="${XDG_CONFIG_HOME:-$HOME/.config}/claude-limits/accounts.json"
+elif [ -f "$XDG_ACCOUNTS" ] || [ ! -f accounts.json ]; then
+  ACCOUNTS="$XDG_ACCOUNTS"
 else
   ACCOUNTS="$PWD/accounts.json"   # legacy repo-local file from a pre-move install
 fi
@@ -27,7 +28,7 @@ elif [ -f "$HOME/.claude/.credentials.json" ]; then
   CREDS="$(cat "$HOME/.claude/.credentials.json")"
 else
   echo "no Claude Code credentials found on this machine — log in with 'claude' first," >&2
-  echo "or paste a token into accounts.json by hand (see accounts.example.json)" >&2
+  echo "or paste a token into the accounts file by hand (see accounts.example.json)" >&2
   exit 1
 fi
 

@@ -1,3 +1,4 @@
 accounts.json
 accounts.json.tmp
 .DS_Store
+claude-oauth-accounts.json
