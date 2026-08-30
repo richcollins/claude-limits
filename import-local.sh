@@ -9,6 +9,15 @@ cd "$(dirname "$0")"
 
 NAME="${1:-local}"
 
+# Same resolution as server.mjs: $ACCOUNTS_PATH > XDG config > legacy repo file.
+if [ -n "${ACCOUNTS_PATH:-}" ]; then
+  ACCOUNTS="$ACCOUNTS_PATH"
+elif [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/claude-limits/accounts.json" ] || [ ! -f accounts.json ]; then
+  ACCOUNTS="${XDG_CONFIG_HOME:-$HOME/.config}/claude-limits/accounts.json"
+else
+  ACCOUNTS="$PWD/accounts.json"   # legacy repo-local file from a pre-move install
+fi
+
 command -v jq >/dev/null || { echo "jq is required (brew install jq / apt install jq)" >&2; exit 1; }
 
 CREDS=""
@@ -27,7 +36,8 @@ echo "$CREDS" | jq -e '.claudeAiOauth.accessToken' >/dev/null 2>&1 || {
   exit 1
 }
 
-[ -f accounts.json ] || echo "[]" > accounts.json
+mkdir -p "$(dirname "$ACCOUNTS")"
+[ -f "$ACCOUNTS" ] || echo "[]" > "$ACCOUNTS"
 
 jq --arg name "$NAME" --argjson creds "$CREDS" '
   map(select(.name != $name)) + [{
@@ -36,7 +46,7 @@ jq --arg name "$NAME" --argjson creds "$CREDS" '
     refreshToken: $creds.claudeAiOauth.refreshToken,
     expiresAt: $creds.claudeAiOauth.expiresAt
   }]
-' accounts.json > accounts.json.tmp && mv accounts.json.tmp accounts.json
+' "$ACCOUNTS" > "$ACCOUNTS.tmp" && mv "$ACCOUNTS.tmp" "$ACCOUNTS"
 
-chmod 600 accounts.json
-echo "saved \"$NAME\" to accounts.json"
+chmod 600 "$ACCOUNTS"
+echo "saved \"$NAME\" to $ACCOUNTS"

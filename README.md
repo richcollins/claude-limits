@@ -30,8 +30,16 @@ exists updates that entry instead of duplicating it.
 
 ## Adding more accounts
 
-`accounts.json` is a plain array (see `accounts.example.json`). It is gitignored, and it
-holds live OAuth tokens — treat it like a password file and never commit or paste it.
+`accounts.json` lives at `~/.config/claude-limits/accounts.json` (`ACCOUNTS_PATH` env
+overrides; a legacy repo-local `accounts.json` from an older install still works until
+you move it). It's a plain array (see `accounts.example.json`) of live OAuth tokens —
+treat it like a password file and never commit or paste it. It's kept outside the repo
+deliberately: a working tree is one `git clean -fdx` away from deleting it, and copies or
+archives of the repo would carry it along. Migrating an older install:
+
+```bash
+mkdir -p ~/.config/claude-limits && mv accounts.json ~/.config/claude-limits/ && launchctl kickstart -k gui/$(id -u)/local.claude-limits
+```
 
 The server also **writes** it: refreshing a full-login entry (on dashboard polls or
 `/api/token` calls alike) persists the new token pair by rewriting the whole file. Don't
@@ -180,8 +188,12 @@ network, and nothing faces the internet:
     command: node server.mjs
     volumes:
       - ./claude-limits:/app
+      # accounts file stays outside the repo checkout; :ro is fine when it
+      # holds only setup tokens (nothing ever refreshes, so nothing writes)
+      - ~/.config/claude-limits/accounts.json:/data/accounts.json:ro
     environment:
       LIMITS_KEY: ${LIMITS_KEY}
+      ACCOUNTS_PATH: /data/accounts.json
     restart: unless-stopped
     # no ports: — reachable only inside the stack at http://claude-limits:10460
 ```
@@ -202,7 +214,8 @@ network, and nothing faces the internet:
 
 ## Troubleshooting
 
-- **"accounts.json not found"** — run `./import-local.sh`.
+- **"no accounts file at …"** — run `./import-local.sh`; the message names the exact path
+  the server resolved (`ACCOUNTS_PATH` > `~/.config/claude-limits/` > legacy repo file).
 - **A card shows an error instead of bars** — the message is the API's own. `401`/`403`
   usually means an expired token with no refresh token: re-run `import-local.sh`.
 - **Nothing on the page at all** — check the server is up: `curl -s localhost:10460/api/usage`.

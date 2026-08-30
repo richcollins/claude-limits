@@ -6,14 +6,28 @@
 // static dashboard.
 
 import { readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const ACCOUNTS_PATH = path.join(ROOT, "accounts.json");
 const PORT = Number(process.env.PORT) || 10460;
+
+// accounts.json lives OUTSIDE the repo by default: a working tree is a bad
+// home for live credentials (git clean -fdx deletes ignored files, repo
+// copies/archives carry them along, worktrees don't see them). Resolution:
+// $ACCOUNTS_PATH > XDG config > legacy repo-local file (pre-move installs).
+const CONFIG_DIR = path.join(
+  process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"),
+  "claude-limits"
+);
+const ACCOUNTS_PATH = process.env.ACCOUNTS_PATH
+  || [path.join(CONFIG_DIR, "accounts.json"), path.join(ROOT, "accounts.json")]
+    .find((p) => existsSync(p))
+  || path.join(CONFIG_DIR, "accounts.json");
 
 const API_ORIGIN = "https://api.anthropic.com";
 const USAGE_PATH = "/api/oauth/usage";
@@ -191,7 +205,7 @@ function getUsage() {
   const promise = (async () => {
     const accounts = await loadAccounts();
     if (accounts === null) {
-      return { error: "accounts.json not found — run ./import-local.sh, or copy accounts.example.json and add your tokens" };
+      return { error: `no accounts file at ${ACCOUNTS_PATH} — run ./import-local.sh, or copy accounts.example.json there and add your tokens` };
     }
     if (accounts.length === 0) {
       return { error: "accounts.json has no accounts yet — run ./import-local.sh to add this machine's login" };
