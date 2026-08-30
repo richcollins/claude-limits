@@ -81,6 +81,48 @@ Defaults to **10460**; `PORT=… node server.mjs` overrides it. If you change it
 `.claude/launch.json` too (that's a Claude Code preview config — harmless to delete if you
 don't use Claude Code).
 
+## Using it from other apps
+
+The server is a shared local service, not just the dashboard's backend. Any app on the
+machine — including browser pages on other origins (CORS is open) — can poll:
+
+```
+GET http://localhost:10460/api/status
+```
+
+```json
+{
+  "status": "warning",
+  "accounts": [
+    {
+      "name": "personal",
+      "ok": true,
+      "source": "endpoint",
+      "status": "warning",
+      "windows": [
+        { "id": "session",    "label": "Session (5h)",       "percent": 12, "resetsAt": "2026-08-31T01:00:00.000Z" },
+        { "id": "weekly_all", "label": "Week — all models",  "percent": 74, "resetsAt": "2026-09-01T04:00:00.000Z" }
+      ]
+    }
+  ]
+}
+```
+
+Both token kinds normalize to the same shape, so consumers never care which an account
+uses. Window ids are stable: `session`, `weekly_all`, `weekly_<model>` (e.g.
+`weekly_fable`), `overage`. `percent` is 0–100; `resetsAt` is ISO 8601 or null. Status is
+`ok` / `warning` (≥70%) / `critical` (≥90%) / `limited` (≥100% or the API is rejecting
+requests); the top-level `status` is the worst across accounts. Failed accounts appear as
+`{ "name", "ok": false, "error" }` and don't affect the top-level status.
+
+Results are cached server-side for 30s, so poll as often as you like — extra clients
+don't add upstream API calls. `/api/usage` (the dashboard's richer, per-source raw shape)
+is also CORS-open if you need details `/api/status` drops.
+
+```js
+const { status } = await (await fetch("http://localhost:10460/api/status")).json();
+```
+
 ## How it works
 
 - `GET /api/usage` fans out to `GET https://api.anthropic.com/api/oauth/usage` per account

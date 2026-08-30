@@ -2,6 +2,8 @@
 
 Local dashboard for Claude usage limits across multiple OAuth accounts. Zero-dependency Node: `server.mjs` (proxy + static) and `public/index.html` (single-file frontend). No build step, no npm.
 
+The server doubles as a shared local service for other apps: `GET /api/status` returns a normalized summary (stable window ids `session`/`weekly_all`/`weekly_<model>`/`overage`, `percent` 0–100, per-account and top-level `status` of ok/warning/critical/limited) with the endpoint-vs-headers distinction erased. Both `/api/*` routes are CORS-open (`Access-Control-Allow-Origin: *`), and results are cached 30s (`usageCache`) so extra polling clients add no upstream calls — important because a 429 from the usage endpoint falls back to the paid inference probe. Consumer contract is documented in README "Using it from other apps"; don't rename window ids or status values without updating consumers.
+
 ## Usually runs under launchd — restart after server edits
 
 `./install-agent.sh` installs LaunchAgent `local.claude-limits` (KeepAlive), so the server is typically not running from a terminal. Edits to `server.mjs` do nothing until:

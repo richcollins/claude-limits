@@ -165,31 +165,143 @@ async function fetchUsage(account, accounts) {
   return res.json();
 }
 
+// One shared fetch for all clients: the dashboard polls every 60s, and other
+// local apps poll /api/status too. Without this cache each extra client
+// multiplies calls to the usage endpoint, which rate-limits (429) under load —
+// and a 429 falls back to the inference probe, which costs real tokens.
+const USAGE_TTL_MS = 30_000;
+let usageCache = null; // {at, promise}
+
+function getUsage() {
+  if (usageCache && Date.now() - usageCache.at < USAGE_TTL_MS) return usageCache.promise;
+  const at = Date.now();
+  const promise = (async () => {
+    const accounts = await loadAccounts();
+    if (accounts === null) {
+      return { error: "accounts.json not found — run ./import-local.sh, or copy accounts.example.json and add your tokens" };
+    }
+    if (accounts.length === 0) {
+      return { error: "accounts.json has no accounts yet — run ./import-local.sh to add this machine's login" };
+    }
+    const results = await Promise.all(
+      accounts.map(async (account) => {
+        const name = account.name || "unnamed";
+        try {
+          const usage = await fetchUsage(account, accounts);
+          return { name, ok: true, usage, fetchedAt: Date.now() };
+        } catch (err) {
+          return { name, ok: false, error: String(err.message || err) };
+        }
+      })
+    );
+    return { accounts: results };
+  })();
+  usageCache = { at, promise };
+  promise.catch(() => { if (usageCache?.promise === promise) usageCache = null; });
+  return promise;
+}
+
+function sendJson(res, data) {
+  res.writeHead(200, {
+    "Content-Type": "application/json",
+    // Local service consumed by other local apps (browser pages included).
+    "Access-Control-Allow-Origin": "*",
+  });
+  res.end(JSON.stringify(data));
+}
+
 async function handleUsage(res) {
-  const accounts = await loadAccounts();
-  if (accounts === null) {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "accounts.json not found — run ./import-local.sh, or copy accounts.example.json and add your tokens" }));
+  sendJson(res, await getUsage());
+}
+
+// --- /api/status: normalized summary for other apps ---------------------------
+// Both upstream shapes (endpoint limits[] and probe header windows) reduce to
+// the same window list, so consumers don't care which kind of token an account
+// uses. Stable ids: "session", "weekly_all", "weekly_<scope>", "overage".
+
+const HEADER_WINDOW_IDS = {
+  five_hour: "session",
+  seven_day: "weekly_all",
+  seven_day_opus: "weekly_opus",
+  seven_day_sonnet: "weekly_sonnet",
+  seven_day_fable: "weekly_fable",
+  seven_day_oauth_apps: "weekly_apps",
+  seven_day_overage_included: "weekly_overage_included",
+  overage: "overage",
+};
+
+const WINDOW_LABELS = {
+  session: "Session (5h)",
+  weekly_all: "Week — all models",
+  weekly_overage_included: "Week — incl. extra usage",
+  overage: "Extra usage",
+};
+
+function normalizeWindows(usage) {
+  const windows = [];
+  if (usage.limits?.length) {
+    for (const lim of usage.limits) {
+      const scopeName = lim.scope?.model?.display_name || lim.scope?.surface?.display_name;
+      const id = scopeName
+        ? "weekly_" + scopeName.toLowerCase().replace(/[^a-z0-9]+/g, "_")
+        : lim.kind;
+      windows.push({
+        id,
+        label: scopeName ? `Week — ${scopeName}` : (WINDOW_LABELS[lim.kind] || lim.kind),
+        percent: lim.percent ?? null,
+        resetsAt: lim.resets_at ?? null,
+      });
+    }
+  } else {
+    for (const [key, id] of Object.entries(HEADER_WINDOW_IDS)) {
+      const w = usage[key];
+      if (!w || w.utilization == null) continue;
+      windows.push({
+        id,
+        label: WINDOW_LABELS[id] || `Week — ${id.replace(/^weekly_/, "")}`,
+        percent: w.utilization,
+        resetsAt: w.resets_at ?? null,
+      });
+    }
+  }
+  return windows;
+}
+
+// Same thresholds as the dashboard's bar colors (70 warn / 90 critical);
+// "limited" means the API itself says requests are being rejected.
+function statusOf(windows, headerStatus) {
+  if (headerStatus === "rejected") return "limited";
+  const max = Math.max(0, ...windows.map((w) => w.percent ?? 0));
+  if (max >= 100) return "limited";
+  if (max >= 90) return "critical";
+  if (max >= 70 || headerStatus === "allowed_warning") return "warning";
+  return "ok";
+}
+
+const STATUS_RANK = { ok: 0, warning: 1, critical: 2, limited: 3 };
+
+async function handleStatus(res) {
+  const data = await getUsage();
+  if (data.error) {
+    sendJson(res, { error: data.error });
     return;
   }
-  if (accounts.length === 0) {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "accounts.json has no accounts yet — run ./import-local.sh to add this machine's login" }));
-    return;
-  }
-  const results = await Promise.all(
-    accounts.map(async (account) => {
-      const name = account.name || "unnamed";
-      try {
-        const usage = await fetchUsage(account, accounts);
-        return { name, ok: true, usage, fetchedAt: Date.now() };
-      } catch (err) {
-        return { name, ok: false, error: String(err.message || err) };
-      }
-    })
-  );
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ accounts: results }));
+  const accounts = data.accounts.map((acct) => {
+    if (!acct.ok) return { name: acct.name, ok: false, error: acct.error };
+    const windows = normalizeWindows(acct.usage);
+    return {
+      name: acct.name,
+      ok: true,
+      source: acct.usage.source === "headers" ? "headers" : "endpoint",
+      status: statusOf(windows, acct.usage.status),
+      windows,
+      fetchedAt: acct.fetchedAt,
+    };
+  });
+  const status = accounts
+    .filter((a) => a.ok)
+    .reduce((worst, a) => (STATUS_RANK[a.status] > STATUS_RANK[worst] ? a.status : worst), "ok");
+  sendJson(res, { status, accounts });
 }
 
 async function handleStatic(urlPath, res) {
@@ -217,7 +329,15 @@ async function handleStatic(urlPath, res) {
 createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   try {
-    if (url.pathname === "/api/usage") await handleUsage(res);
+    if (req.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+      res.writeHead(204, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET",
+      });
+      res.end();
+    }
+    else if (url.pathname === "/api/usage") await handleUsage(res);
+    else if (url.pathname === "/api/status") await handleStatus(res);
     else await handleStatic(url.pathname, res);
   } catch (err) {
     res.writeHead(500, { "Content-Type": "application/json" });
