@@ -18,15 +18,13 @@ const PORT = Number(process.env.PORT) || 10460;
 
 // The accounts file lives OUTSIDE the repo by default: a working tree is a bad
 // home for live credentials (git clean -fdx deletes ignored files, repo
-// copies/archives carry them along, worktrees don't see them). The basename is
-// self-describing because the file gets mounted into other stacks where the
-// directory no longer says what it is. Resolution:
-// $ACCOUNTS_PATH > XDG config > legacy repo-local accounts.json (pre-move installs).
+// copies/archives carry them along, worktrees don't see them). ~/.claude-limits
+// matches the ~/.claude-style home-dotdir convention of sibling apps. The
+// basename is self-describing because the file gets mounted into other stacks
+// where the directory no longer says what it is. Resolution:
+// $ACCOUNTS_PATH > ~/.claude-limits > legacy repo-local accounts.json (pre-move installs).
+const CONFIG_DIR = path.join(homedir(), ".claude-limits");
 const ACCOUNTS_FILE = "claude-oauth-accounts.json";
-const CONFIG_DIR = path.join(
-  process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"),
-  "claude-limits"
-);
 const ACCOUNTS_PATH = process.env.ACCOUNTS_PATH
   || [path.join(CONFIG_DIR, ACCOUNTS_FILE), path.join(ROOT, "accounts.json")]
     .find((p) => existsSync(p))

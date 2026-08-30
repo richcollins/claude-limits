@@ -9,12 +9,12 @@ cd "$(dirname "$0")"
 
 NAME="${1:-local}"
 
-# Same resolution as server.mjs: $ACCOUNTS_PATH > XDG config > legacy repo file.
-XDG_ACCOUNTS="${XDG_CONFIG_HOME:-$HOME/.config}/claude-limits/claude-oauth-accounts.json"
+# Same resolution as server.mjs: $ACCOUNTS_PATH > ~/.claude-limits > legacy repo file.
+HOME_ACCOUNTS="$HOME/.claude-limits/claude-oauth-accounts.json"
 if [ -n "${ACCOUNTS_PATH:-}" ]; then
   ACCOUNTS="$ACCOUNTS_PATH"
-elif [ -f "$XDG_ACCOUNTS" ] || [ ! -f accounts.json ]; then
-  ACCOUNTS="$XDG_ACCOUNTS"
+elif [ -f "$HOME_ACCOUNTS" ] || [ ! -f accounts.json ]; then
+  ACCOUNTS="$HOME_ACCOUNTS"
 else
   ACCOUNTS="$PWD/accounts.json"   # legacy repo-local file from a pre-move install
 fi

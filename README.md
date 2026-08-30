@@ -30,7 +30,7 @@ exists updates that entry instead of duplicating it.
 
 ## Adding more accounts
 
-The accounts file lives at `~/.config/claude-limits/claude-oauth-accounts.json`
+The accounts file lives at `~/.claude-limits/claude-oauth-accounts.json`
 (`ACCOUNTS_PATH` env overrides; a legacy repo-local `accounts.json` from an older install
 still works until you move it). The basename says what it holds on purpose — mounted into
 another stack, `accounts.json` alone could mean anything. It's a plain array (see
@@ -40,7 +40,7 @@ commit or paste it. It's kept outside the repo deliberately: a working tree is o
 along. Migrating an older install:
 
 ```bash
-mkdir -p ~/.config/claude-limits && mv accounts.json ~/.config/claude-limits/claude-oauth-accounts.json && launchctl kickstart -k gui/$(id -u)/local.claude-limits
+mkdir -p ~/.claude-limits && mv accounts.json ~/.claude-limits/claude-oauth-accounts.json && launchctl kickstart -k gui/$(id -u)/local.claude-limits
 ```
 
 The server also **writes** it: refreshing a full-login entry (on dashboard polls or
@@ -192,7 +192,7 @@ network, and nothing faces the internet:
       - ./claude-limits:/app
       # accounts file stays outside the repo checkout; :ro is fine when it
       # holds only setup tokens (nothing ever refreshes, so nothing writes)
-      - ~/.config/claude-limits/claude-oauth-accounts.json:/data/claude-oauth-accounts.json:ro
+      - ~/.claude-limits/claude-oauth-accounts.json:/data/claude-oauth-accounts.json:ro
     environment:
       LIMITS_KEY: ${LIMITS_KEY}
       ACCOUNTS_PATH: /data/claude-oauth-accounts.json
@@ -217,7 +217,7 @@ network, and nothing faces the internet:
 ## Troubleshooting
 
 - **"no accounts file at …"** — run `./import-local.sh`; the message names the exact path
-  the server resolved (`ACCOUNTS_PATH` > `~/.config/claude-limits/` > legacy repo file).
+  the server resolved (`ACCOUNTS_PATH` > `~/.claude-limits/` > legacy repo file).
 - **A card shows an error instead of bars** — the message is the API's own. `401`/`403`
   usually means an expired token with no refresh token: re-run `import-local.sh`.
 - **Nothing on the page at all** — check the server is up: `curl -s localhost:10460/api/usage`.
