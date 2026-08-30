@@ -57,6 +57,7 @@ with a `name`.
 It writes `~/Library/LaunchAgents/local.claude-limits.plist` pointing at wherever you
 cloned the repo, and logs to `~/Library/Logs/claude-limits.log`. Options:
 `--port 10461` to move the port, `--label com.you.claude-limits` to rename it,
+`--key <secret>` to enable the `/api/token` broker (sets `LIMITS_KEY`),
 `--uninstall` to remove it.
 
 After editing `server.mjs`, restart it:
@@ -121,6 +122,54 @@ is also CORS-open if you need details `/api/status` drops.
 
 ```js
 const { status } = await (await fetch("http://localhost:10460/api/status")).json();
+```
+
+Scoped weekly windows: accounts read via the usage endpoint report whatever scoped rows
+the API returns; header-fallback accounts only reveal a model's scoped window if the
+server probes that model. Currently only Fable *has* a scoped weekly window (an
+opus-targeted probe returns no `7d_oi` header — opus draws from `weekly_all`), so the
+server probes haiku + fable per account.
+
+### Token broker: `/api/token`
+
+For trusted consumers that run inference themselves (e.g. injecting
+`CLAUDE_CODE_OAUTH_TOKEN` into a subprocess) and want this server to stay the single
+owner of `accounts.json`:
+
+```
+GET /api/token?name=<account>
+x-limits-key: <secret>
+→ { "name": "...", "accessToken": "...", "expiresAt": 1788... | null }
+```
+
+Disabled unless the server was started with `LIMITS_KEY=<secret>` in its environment
+(`./install-agent.sh --key <secret>` under launchd). Unlike `/api/status` it is **not**
+CORS-open, and the shared secret is required on every call. Full-login accounts are
+refreshed before serving; setup-token accounts return the long-lived token as-is.
+
+## Second instance on a remote host
+
+The same codebase runs anywhere Node does, with no config beyond env vars — e.g. a
+production box whose services want limit awareness. Give the remote instance its **own**
+`accounts.json` of `claude setup-token` tokens (~1 year, inference-only scope, no refresh
+credential): copies of full-login entries would fork the refresh-token rotation between
+hosts, and setup tokens keep the remote box holding the least-privileged secret that
+still works. Nothing is shared between instances but the git repo.
+
+In a docker-compose stack, don't publish the port — consumers reach it on the compose
+network, and nothing faces the internet:
+
+```yaml
+  claude-limits:
+    image: node:22-alpine
+    working_dir: /app
+    command: node server.mjs
+    volumes:
+      - ./claude-limits:/app
+    environment:
+      LIMITS_KEY: ${LIMITS_KEY}
+    restart: unless-stopped
+    # no ports: — reachable only inside the stack at http://claude-limits:10460
 ```
 
 ## How it works

@@ -7,6 +7,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -119,6 +120,18 @@ async function probeModel(token, model) {
 const PROBE_TTL_MS = 5 * 60_000;
 const probeCache = new Map(); // account name → {at, usage}
 
+// A premium-model-targeted probe reports that model's scoped weekly window as
+// 7d_oi (the haiku probe carries no 7d_oi). Only models that actually have a
+// scoped weekly window belong here — verified 2026-08-30: an opus-targeted
+// probe returns no 7d_oi (opus draws from the all-models weekly), so listing
+// it would burn a probe per account per TTL for nothing. Each entry is real
+// inference; don't grow this list without checking the model's headers first.
+const SCOPED_PROBE_MODELS = [
+  ["seven_day_fable", "claude-fable-5"],
+];
+
+const STATUS_SEVERITY = { allowed: 0, allowed_warning: 1, rejected: 2 };
+
 async function probeHeaders(account) {
   const cached = probeCache.get(account.name);
   if (cached && Date.now() - cached.at < PROBE_TTL_MS) return cached.usage;
@@ -126,18 +139,18 @@ async function probeHeaders(account) {
   const base = await probeModel(account.accessToken, "claude-haiku-4-5");
   const usage = { source: "headers", status: base.status, ...base.windows };
 
-  // A Fable-targeted request reports the Fable weekly window as 7d_oi.
-  try {
-    const fable = await probeModel(account.accessToken, "claude-fable-5");
-    if (fable.windows.seven_day_overage_included) {
-      usage.seven_day_fable = fable.windows.seven_day_overage_included;
-      if (fable.status === "rejected" || (fable.status === "allowed_warning" && usage.status === "allowed")) {
-        usage.status = fable.status;
+  await Promise.all(SCOPED_PROBE_MODELS.map(async ([key, model]) => {
+    try {
+      const probe = await probeModel(account.accessToken, model);
+      if (!probe.windows.seven_day_overage_included) return;
+      usage[key] = probe.windows.seven_day_overage_included;
+      if ((STATUS_SEVERITY[probe.status] ?? 0) > (STATUS_SEVERITY[usage.status] ?? 0)) {
+        usage.status = probe.status;
       }
+    } catch {
+      // account has no access to this model — skip its scoped window
     }
-  } catch {
-    // account has no Fable access — base windows only
-  }
+  }));
 
   probeCache.set(account.name, { at: Date.now(), usage });
   return usage;
@@ -304,6 +317,40 @@ async function handleStatus(res) {
   sendJson(res, { status, accounts });
 }
 
+// --- /api/token: token broker for trusted local consumers ---------------------
+// Hands the named account's access token to a client that will run inference
+// itself (e.g. darksided injecting CLAUDE_CODE_OAUTH_TOKEN into an SDK
+// subprocess). This server stays the single owner of accounts.json — consumers
+// never read the file or refresh tokens themselves. Deliberately NOT CORS-open
+// (unlike /api/status, which is safe to open because it's token-free), and
+// fail-closed: disabled unless LIMITS_KEY is set in the environment.
+
+function keyMatches(given, expected) {
+  const a = Buffer.from(given), b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+async function handleToken(url, req, res) {
+  const fail = (code, error) => {
+    res.writeHead(code, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error }));
+  };
+  const key = process.env.LIMITS_KEY;
+  if (!key) return fail(403, "token endpoint disabled — set LIMITS_KEY in the server's environment");
+  const given = req.headers["x-limits-key"];
+  if (typeof given !== "string" || !keyMatches(given, key)) {
+    return fail(401, "missing or wrong x-limits-key header");
+  }
+  const name = url.searchParams.get("name");
+  if (!name) return fail(400, "missing ?name=<account>");
+  const accounts = await loadAccounts();
+  const account = accounts?.find((a) => (a.name || "unnamed") === name);
+  if (!account) return fail(404, `no account named ${JSON.stringify(name)}`);
+  const accessToken = await ensureToken(account, accounts);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ name, accessToken, expiresAt: account.expiresAt ?? null }));
+}
+
 async function handleStatic(urlPath, res) {
   const file = urlPath === "/" ? "index.html" : urlPath.slice(1);
   if (file.includes("..") || file === "accounts.json") {
@@ -329,7 +376,7 @@ async function handleStatic(urlPath, res) {
 createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   try {
-    if (req.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+    if (req.method === "OPTIONS" && (url.pathname === "/api/usage" || url.pathname === "/api/status")) {
       res.writeHead(204, {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET",
@@ -338,6 +385,7 @@ createServer(async (req, res) => {
     }
     else if (url.pathname === "/api/usage") await handleUsage(res);
     else if (url.pathname === "/api/status") await handleStatus(res);
+    else if (url.pathname === "/api/token") await handleToken(url, req, res);
     else await handleStatic(url.pathname, res);
   } catch (err) {
     res.writeHead(500, { "Content-Type": "application/json" });

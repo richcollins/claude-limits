@@ -3,19 +3,21 @@
 # starts at login, restarts if it exits. macOS only — Linux users can run
 # `node server.mjs` directly or wrap it in a systemd user unit.
 #
-# Usage: ./install-agent.sh [--label LABEL] [--port PORT] [--uninstall]
+# Usage: ./install-agent.sh [--label LABEL] [--port PORT] [--key LIMITS_KEY] [--uninstall]
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO="$PWD"
 
 LABEL="local.claude-limits"
 PORT=""
+KEY=""
 UNINSTALL=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --label) LABEL="${2:?--label needs a value}"; shift 2 ;;
     --port) PORT="${2:?--port needs a value}"; shift 2 ;;
+    --key) KEY="${2:?--key needs a value}"; shift 2 ;;
     --uninstall) UNINSTALL=1; shift ;;
     -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
@@ -50,12 +52,18 @@ for other in "$HOME"/Library/LaunchAgents/*.plist; do
   fi
 done
 
-ENV_BLOCK=""
-if [ -n "$PORT" ]; then
-  ENV_BLOCK="  <key>EnvironmentVariables</key>
-  <dict>
+# --key enables the /api/token broker endpoint (LIMITS_KEY in the server env).
+ENV_VARS=""
+[ -n "$PORT" ] && ENV_VARS="$ENV_VARS
     <key>PORT</key>
-    <string>$PORT</string>
+    <string>$PORT</string>"
+[ -n "$KEY" ] && ENV_VARS="$ENV_VARS
+    <key>LIMITS_KEY</key>
+    <string>$KEY</string>"
+ENV_BLOCK=""
+if [ -n "$ENV_VARS" ]; then
+  ENV_BLOCK="  <key>EnvironmentVariables</key>
+  <dict>$ENV_VARS
   </dict>
 "
 fi
